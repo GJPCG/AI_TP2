@@ -23,5 +23,9 @@ for i in range(num_piles):
         except ValueError:
             print("Invalid input. Please enter a whole number.")
 
+# Step 1c: Sort piles ascending and echo back to user
+initial.sort()
+print(f"\nYour piles (sorted): {initial}")
+
 ai = train(10000, initial)
 play(ai, initial=initial)
