@@ -1,19 +1,22 @@
 import os
+import sys
 from nim import train, play, load_game, SAVE_PATH
 
-    
+data = None
+
+# Step 3: Check for an existing save at start and offer to load it
+if os.path.exists(SAVE_PATH):
+    choice = input("Saved game found. Load it? (y/n): ").strip().lower()
+    if choice == "y":
+        data = load_game()
+
+# If a save was loaded, skip setup and training entirely
+if data:
+    play(data["ai"], human_player=data["human_player"], game=data["game"])
+    sys.exit(0)
+
 # Step 1a: Ask for number of piles (must be >= 3)
 while True:
-  data = None
-  # Step 3: Check for an existing save at start and offer to load it
-  if os.path.exists(SAVE_PATH):
-    choice = input("Saved game found. Load it? (y/n): ").strip().lower()
-      if choice == "y":
-        data = load_game()
-  # If a save was loaded, skip setup and training entirely
-  if data:
-      play(data["ai"], human_player=data["human_player"], game=data["game"])
-  else:
     try:
         num_piles = int(input("How many piles? (minimum 3): "))
         if num_piles >= 3:
