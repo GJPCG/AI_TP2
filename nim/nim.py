@@ -161,7 +161,7 @@ class NimAI():
         return max(actions, key=lambda action: self.get_q_value(state, action))
 
 
-def train(n):
+def train(n, initial=[1, 3, 5, 7]):
     """
     Train an AI by playing `n` games against itself.
     """
@@ -171,7 +171,7 @@ def train(n):
     # Play n games
     for i in range(n):
         print(f"Playing training game {i + 1}")
-        game = Nim()
+        game = Nim(initial)
 
         # Keep track of last move made by either player
         last = {
@@ -220,7 +220,7 @@ def train(n):
     return player
 
 
-def play(ai, human_player=None):
+def play(ai, human_player=None, initial=[1, 3, 5, 7]):
     """
     Play human game against the AI.
     `human_player` can be set to 0 or 1 to specify whether
@@ -232,7 +232,7 @@ def play(ai, human_player=None):
         human_player = random.randint(0, 1)
 
     # Create new game
-    game = Nim()
+    game = Nim(initial)
 
     # Game loop
     while True:
