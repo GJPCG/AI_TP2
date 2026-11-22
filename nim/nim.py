@@ -1,6 +1,12 @@
 import math
+import os
+import pickle
 import random
 import time
+
+
+SAVE_DIR = "saves"
+SAVE_PATH = os.path.join(SAVE_DIR, "savegame.pkl")
 
 
 class Nim():
@@ -161,6 +167,34 @@ class NimAI():
         return max(actions, key=lambda action: self.get_q_value(state, action))
 
 
+def save_game(game, ai, human_player):
+    """
+    Save the current game state, AI Q-table, and player assignment
+    to the standard save file.
+    """
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    data = {
+        "game": game,
+        "ai": ai,
+        "human_player": human_player
+    }
+    with open(SAVE_PATH, "wb") as f:
+        pickle.dump(data, f)
+    print("Game saved.")
+
+
+def load_game():
+    """
+    Load a saved game from the standard save file.
+    Returns a data dict with keys 'game', 'ai', 'human_player',
+    or None if no save file exists.
+    """
+    if not os.path.exists(SAVE_PATH):
+        return None
+    with open(SAVE_PATH, "rb") as f:
+        return pickle.load(f)
+
+
 def train(n):
     """
     Train an AI by playing `n` games against itself.
@@ -220,19 +254,21 @@ def train(n):
     return player
 
 
-def play(ai, human_player=None):
+def play(ai, human_player=None, game=None):
     """
     Play human game against the AI.
     `human_player` can be set to 0 or 1 to specify whether
     human player moves first or second.
+    `game` can be a pre-built Nim instance (e.g. restored from a save).
     """
 
     # If no player order set, choose human's order randomly
     if human_player is None:
         human_player = random.randint(0, 1)
 
-    # Create new game
-    game = Nim()
+    # Create new game unless one was provided (e.g. loaded from save)
+    if game is None:
+        game = Nim()
 
     # Game loop
     while True:
@@ -251,12 +287,44 @@ def play(ai, human_player=None):
         # Let human make a move
         if game.player == human_player:
             print("Your Turn")
+            loaded = False
+
             while True:
-                pile = int(input("Choose Pile: "))
-                count = int(input("Choose Count: "))
-                if (pile, count) in available_actions:
+                pile_input = input("Choose Pile (or 's' to save, 'l' to load): ").strip().lower()
+
+                # Save game
+                if pile_input == "s":
+                    save_game(game, ai, human_player)
+                    continue
+
+                # Load game
+                if pile_input == "l":
+                    data = load_game()
+                    if data:
+                        game.piles = data["game"].piles
+                        game.player = data["game"].player
+                        game.winner = data["game"].winner
+                        ai.q = data["ai"].q
+                        human_player = data["human_player"]
+                        print("Game loaded.")
+                        loaded = True
+                    else:
+                        print("No save file found.")
                     break
-                print("Invalid move, try again.")
+
+                # Normal pile selection
+                try:
+                    pile = int(pile_input)
+                    count = int(input("Choose Count: "))
+                    if (pile, count) in available_actions:
+                        break
+                    print("Invalid move, try again.")
+                except ValueError:
+                    print("Invalid input. Enter a pile number, 's' to save, or 'l' to load.")
+
+            # If a save was loaded, restart the outer loop to re-print the board
+            if loaded:
+                continue
 
         # Have AI make a move
         else:
