@@ -47,6 +47,12 @@ MIN_BOARD_WIDTH = 7 * SPACING
 MAX_BOARD_WIDTH = 10 * SPACING
 MAX_BOARD_HEIGHT = 6 * ROW_HEIGHT
 
+# Top moves window
+TOP_MOVES = 5
+METER_WIDTH = 300
+METER_ROW = 46
+BAR_HEIGHT = 8
+
 TOGGLE = dict(
     bg=PANEL, fg=TEXT, selectcolor=BG, activebackground=PANEL,
     activeforeground=TEXT, font=(FONT, 10), highlightthickness=0
@@ -79,6 +85,126 @@ def read_int(var, low, high):
     return value if low <= value <= high else None
 
 
+def describe(action):
+    pile, count = action
+    return f"take {count} from pile {pile}"
+
+
+def top_moves(ai, state):
+    """
+    Return the `TOP_MOVES` best actions in `state` as `(action, q)` pairs,
+    best first. Ties keep the order `choose_action` sees them in,
+    so the first entry is the move the AI plays.
+    """
+    actions = list(Nim.available_actions(state))
+    ranked = sorted(actions, key=lambda action: ai.get_q_value(state, action), reverse=True)
+    return [(action, ai.get_q_value(state, action)) for action in ranked[:TOP_MOVES]]
+
+
+class TopMovesWindow():
+    """
+    Small window in the top-left corner of the screen listing the
+    AI's highest-valued moves, each with a bar showing its Q-value.
+    """
+
+    def __init__(self, root, on_close):
+        self.window = tk.Toplevel(root, bg=BG, padx=18, pady=14)
+        self.window.title("AI's top moves")
+        self.window.resizable(False, False)
+        self.window.transient(root)
+        self.window.geometry("+0+0")
+        self.window.protocol("WM_DELETE_WINDOW", on_close)
+
+        tk.Label(
+            self.window, text="AI'S TOP MOVES", font=(FONT, 9, "bold"),
+            fg=MUTED, bg=BG
+        ).pack(anchor="w")
+        self.title = tk.Label(
+            self.window, font=(FONT, 12, "bold"), fg=TEXT, bg=BG, anchor="w"
+        )
+        self.title.pack(fill="x")
+        self.subtitle = tk.Label(
+            self.window, font=(FONT, 10), fg=MUTED, bg=BG, anchor="w"
+        )
+        self.subtitle.pack(fill="x")
+        self.canvas = tk.Canvas(
+            self.window, width=METER_WIDTH, height=TOP_MOVES * METER_ROW + 24,
+            bg=PANEL, highlightthickness=0
+        )
+        self.canvas.pack(pady=(10, 8))
+        tk.Label(
+            self.window,
+            text="Q-value for the player to move:\n+1 = winning move, −1 = losing move",
+            font=(FONT, 9), fg=MUTED, bg=BG, justify="left"
+        ).pack(anchor="w")
+
+    def show(self, title, subtitle, rows=(), mark=None, mark_color=None):
+        """
+        Display `rows` of `(action, q)` pairs, best first.
+        The row for action `mark` is outlined in `mark_color`.
+        """
+        self.title.config(text=title)
+        self.subtitle.config(text=subtitle)
+        self.canvas.delete("all")
+        if not rows:
+            self.canvas.create_text(
+                METER_WIDTH / 2, (TOP_MOVES * METER_ROW + 24) / 2,
+                text="No moves to show", fill=MUTED, font=(FONT, 10)
+            )
+            return
+
+        pad = 14
+        zero = METER_WIDTH / 2
+        half = zero - pad
+        for rank, (action, q) in enumerate(rows):
+            top = 6 + rank * METER_ROW
+            if action == mark:
+                self.canvas.create_rectangle(
+                    4, top, METER_WIDTH - 4, top + METER_ROW - 4,
+                    outline=mark_color, width=2
+                )
+            y = top + 13
+            self.canvas.create_text(
+                pad, y, text=rank + 1, anchor="w", fill=MUTED,
+                font=(FONT, 10, "bold")
+            )
+            self.canvas.create_text(
+                pad + 18, y, text=describe(action).capitalize(), anchor="w",
+                fill=TEXT, font=(FONT, 10)
+            )
+            self.canvas.create_text(
+                METER_WIDTH - pad, y, text=f"{q:+.2f}", anchor="e",
+                fill=TEXT, font=(FONT, 10, "bold")
+            )
+
+            # Track for the -1..+1 range, a tick at zero, then the bar
+            y = top + 31
+            self.canvas.create_line(pad, y, METER_WIDTH - pad, y, fill=GHOST)
+            self.canvas.create_line(zero, y - 7, zero, y + 7, fill=MUTED)
+            self.bar(zero, zero + q * half, y, GOOD if q > 0 else BAD)
+
+        bottom = 6 + TOP_MOVES * METER_ROW + 4
+        for x, label in [(pad, "−1"), (zero, "0"), (METER_WIDTH - pad, "+1")]:
+            self.canvas.create_text(x, bottom, text=label, fill=MUTED, font=(FONT, 8))
+
+    def bar(self, x0, x1, y, color):
+        """
+        Horizontal bar from the baseline `x0` to `x1`, rounded at the `x1` end.
+        """
+        r = BAR_HEIGHT / 2
+        if abs(x1 - x0) < BAR_HEIGHT:
+            if x1 != x0:
+                self.canvas.create_rectangle(
+                    min(x0, x1), y - r, max(x0, x1), y + r, fill=color, outline=""
+                )
+            return
+        inner = x1 - r if x1 > x0 else x1 + r
+        self.canvas.create_rectangle(
+            min(x0, inner), y - r, max(x0, inner), y + r, fill=color, outline=""
+        )
+        self.canvas.create_oval(inner - r, y - r, inner + r, y + r, fill=color, outline="")
+
+
 class NimApp():
 
     def __init__(self, root):
@@ -92,8 +218,11 @@ class NimApp():
         self.ai_pick = None  # action the AI is about to make
         self.pending = None  # id of a scheduled AI step
         self.score = {"human": 0, "ai": 0}
+        self.last_decision = None  # (state, action) of the AI's latest move
+        self.top_moves = None
         self.first_var = tk.StringVar(value="random")
         self.hints_var = tk.BooleanVar(value=False)
+        self.top_moves_var = tk.BooleanVar(value=True)
         self.digits_only = root.register(
             lambda text: text == "" or (text.isdigit() and len(text) <= 2)
         )
@@ -109,6 +238,11 @@ class NimApp():
             background=OBJECT, bordercolor=PANEL,
             lightcolor=OBJECT, darkcolor=OBJECT
         )
+
+        # Top moves window in the top-left corner, game window to its right
+        self.toggle_top_moves()
+        root.update_idletasks()
+        root.geometry(f"+{self.top_moves.window.winfo_reqwidth() + 40}+0")
 
         self.show_setup()
 
@@ -126,6 +260,8 @@ class NimApp():
         """
         Let the player choose the number of piles and the size of each.
         """
+        self.game = None
+        self.update_top_moves()
         frame = self.new_screen(padx=70, pady=40)
         tk.Label(
             frame, text="NIM", font=(FONT, 36, "bold"), fg=TEXT, bg=BG
@@ -305,6 +441,10 @@ class NimApp():
             panel, text="Show AI hints", variable=self.hints_var,
             command=self.refresh, **TOGGLE
         ).pack(anchor="w")
+        tk.Checkbutton(
+            panel, text="Top moves window", variable=self.top_moves_var,
+            command=self.toggle_top_moves, **TOGGLE
+        ).pack(anchor="w")
 
         self.button(panel, "New game", self.new_game).pack(fill="x", pady=(16, 0))
         self.button(
@@ -402,6 +542,7 @@ class NimApp():
         self.initial = getattr(self.game, "initial", self.game.piles.copy())
         self.hover = None
         self.ai_pick = None
+        self.last_decision = None
         self.build_board()
         self.add_log("Game loaded", MUTED)
         self.advance()
@@ -417,6 +558,7 @@ class NimApp():
         self.human_player = 0 if first == "human" else 1
         self.hover = None
         self.ai_pick = None
+        self.last_decision = None
         self.log.delete(0, "end")
         self.add_log("You move first" if first == "human" else "AI moves first", MUTED)
         self.advance()
@@ -449,6 +591,7 @@ class NimApp():
 
     def ai_choose(self):
         self.ai_pick = self.ai.choose_action(self.game.piles, epsilon=False)
+        self.last_decision = (self.game.piles.copy(), self.ai_pick)
         self.refresh()
         self.pending = self.root.after(AI_REVEAL_MS, self.ai_move)
 
@@ -569,6 +712,55 @@ class NimApp():
         self.canvas.config(cursor="hand2" if self.hover else "")
         self.save_button.config(state="normal" if self.game.winner is None else "disabled")
         self.load_button.config(state="normal" if os.path.exists(SAVE_PATH) else "disabled")
+        self.update_top_moves()
+
+    def toggle_top_moves(self):
+        if self.top_moves_var.get():
+            self.top_moves = TopMovesWindow(self.root, on_close=self.close_top_moves)
+            self.update_top_moves()
+        else:
+            self.close_top_moves()
+
+    def close_top_moves(self):
+        self.top_moves_var.set(False)
+        if self.top_moves is not None:
+            self.top_moves.window.destroy()
+            self.top_moves = None
+
+    def update_top_moves(self):
+        """
+        Rank the moves in whichever position is most useful right now:
+        the AI's turn, the player's turn when hints are on, and
+        otherwise the position where the AI last moved.
+        """
+        if self.top_moves is None:
+            return
+        if self.game is None:
+            self.top_moves.show("No game yet", "Start a game to see what the AI is thinking.")
+            return
+
+        over = self.game.winner is not None
+        if not over and self.game.player != self.human_player:
+            state, mark, color = self.game.piles, self.ai_pick, AI_PICK
+            title = "AI is choosing…" if mark is None else f"AI picks: {describe(mark)}"
+        elif not over and self.hints_var.get():
+            state, color = self.game.piles, HOVER
+            mark = self.hover_action() if self.hover else None
+            title = "Your options (hints are on)"
+        elif self.last_decision is not None:
+            state, mark = self.last_decision
+            color = AI_PICK
+            title = f"AI's last move: {describe(mark)}"
+        else:
+            self.top_moves.show(
+                "Waiting for the AI's turn", "Turn on AI hints to rank your own moves."
+            )
+            return
+
+        self.top_moves.show(
+            title, f"Piles: {', '.join(map(str, state))}",
+            top_moves(self.ai, state), mark, color
+        )
 
     def draw(self):
         self.canvas.delete("all")
