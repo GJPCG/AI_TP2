@@ -7,12 +7,13 @@ Run from this folder with:
 
 import contextlib
 import io
+import os
 import random
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
-from nim import Nim, train
+from nim import Nim, SAVE_PATH, load_game, save_game, train
 
 TRAINING_GAMES = 10000
 AI_THINK_MS = 600   # pause before the AI reveals its move
@@ -163,6 +164,10 @@ class NimApp():
         self.setup_error = tk.Label(frame, font=(FONT, 10), fg=BAD, bg=BG)
         self.setup_error.pack()
         self.button(frame, "Train AI and play", self.start).pack(fill="x", pady=(6, 0))
+        if os.path.exists(SAVE_PATH):
+            self.button(
+                frame, "Load saved game", self.load, primary=False
+            ).pack(fill="x", pady=(8, 0))
 
     def show_size_inputs(self, *args):
         """
@@ -306,6 +311,14 @@ class NimApp():
             panel, "Change piles", self.change_piles, primary=False
         ).pack(fill="x", pady=(8, 0))
 
+        files = tk.Frame(panel, bg=PANEL)
+        files.pack(fill="x", pady=(8, 0))
+        files.columnconfigure((0, 1), weight=1, uniform="files")
+        self.save_button = self.button(files, "Save", self.save, primary=False)
+        self.save_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.load_button = self.button(files, "Load", self.load, primary=False)
+        self.load_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+
         self.section(panel, "Moves")
         self.log = tk.Listbox(
             panel, height=7, width=24, bg=BG, fg=TEXT, font=(FONT, 10),
@@ -333,7 +346,7 @@ class NimApp():
             bg=OBJECT if primary else GHOST, fg=BG if primary else TEXT,
             activebackground=OBJECT_EDGE if primary else MUTED,
             activeforeground=BG if primary else TEXT,
-            relief="flat", cursor="hand2", pady=4
+            disabledforeground=MUTED, relief="flat", cursor="hand2", pady=4
         )
 
     def spinbox(self, parent, var, low, high):
@@ -355,6 +368,44 @@ class NimApp():
         self.cancel_pending()
         self.show_setup()
 
+    def save(self):
+        """
+        Save the current game, the AI and the player order to the save file.
+        """
+        try:
+            save_game(self.game, self.ai, self.human_player)
+        except OSError as error:
+            messagebox.showerror("Save failed", f"Couldn't save the game:\n{error}", parent=self.root)
+            return
+        self.add_log("Game saved", MUTED)
+        self.refresh()
+
+    def load(self):
+        """
+        Restore the game, the AI and the player order from the save file,
+        skipping setup and training.
+        """
+        try:
+            data = load_game()
+        except Exception as error:  # unreadable or incompatible save file
+            messagebox.showerror("Load failed", f"Couldn't load the saved game:\n{error}", parent=self.root)
+            return
+        if data is None:
+            messagebox.showerror("Load failed", "No saved game found.", parent=self.root)
+            return
+
+        self.cancel_pending()
+        self.ai = data["ai"]
+        self.game = data["game"]
+        self.human_player = data["human_player"]
+        # Saves made before Nim kept its starting piles only have the current ones
+        self.initial = getattr(self.game, "initial", self.game.piles.copy())
+        self.hover = None
+        self.ai_pick = None
+        self.build_board()
+        self.add_log("Game loaded", MUTED)
+        self.advance()
+
     def new_game(self):
         self.cancel_pending()
 
@@ -367,9 +418,13 @@ class NimApp():
         self.hover = None
         self.ai_pick = None
         self.log.delete(0, "end")
-        self.log.insert("end", "You move first" if first == "human" else "AI moves first")
-        self.log.itemconfig("end", fg=MUTED)
+        self.add_log("You move first" if first == "human" else "AI moves first", MUTED)
         self.advance()
+
+    def add_log(self, text, color):
+        self.log.insert("end", text)
+        self.log.itemconfig("end", fg=color)
+        self.log.see("end")
 
     def play(self, action, who):
         """
@@ -377,9 +432,7 @@ class NimApp():
         """
         pile, count = action
         self.game.move(action)
-        self.log.insert("end", f"{who} took {count} from pile {pile}")
-        self.log.itemconfig("end", fg=HOVER if who == "You" else AI_PICK)
-        self.log.see("end")
+        self.add_log(f"{who} took {count} from pile {pile}", HOVER if who == "You" else AI_PICK)
 
         if self.game.winner is not None:
             winner = "human" if self.game.winner == self.human_player else "ai"
@@ -514,6 +567,8 @@ class NimApp():
             text=f"You {self.score['human']}  –  {self.score['ai']} AI"
         )
         self.canvas.config(cursor="hand2" if self.hover else "")
+        self.save_button.config(state="normal" if self.game.winner is None else "disabled")
+        self.load_button.config(state="normal" if os.path.exists(SAVE_PATH) else "disabled")
 
     def draw(self):
         self.canvas.delete("all")

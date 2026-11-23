@@ -15,10 +15,12 @@ class Nim():
         """
         Initialize game board.
         Each game board has
+            - `initial`: the piles the game started with
             - `piles`: a list of how many elements remain in each pile
             - `player`: 0 or 1 to indicate which player's turn
             - `winner`: None, 0, or 1 to indicate who the winner is
         """
+        self.initial = initial.copy()
         self.piles = initial.copy()
         self.player = 0
         self.winner = None
